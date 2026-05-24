@@ -234,6 +234,29 @@ Configuration is managed in [`pyproject.toml`](pyproject.toml:1) and [`.flake8`]
 - **Black profile**: Applied to all formatters
 - **Ignore rules**: Compatible with Black formatting
 
+### Running Linters Locally
+
+To run all linters before pushing code:
+
+```bash
+# Run all linters at once
+./scripts/lint-all.sh
+
+# Or run individually:
+
+# Frontend
+pnpm lint
+pnpm exec tsc --noEmit
+
+# Backend
+cd server
+black .
+isort .
+flake8 .
+pylint .
+mypy .
+```
+
 ## 🔧 Development
 
 ### Stop Process on Port 8000

@@ -2,11 +2,12 @@ import json
 import logging
 
 try:
-    import torch
-    import torch.nn as nn
     import numpy as np
     import pandas as pd
+    import torch
+    import torch.nn as nn
     from sklearn.preprocessing import MinMaxScaler
+
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False

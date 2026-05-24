@@ -1,15 +1,16 @@
-from fastapi import FastAPI, HTTPException, Request, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 import os
-import requests
 import random
-from typing import List, Optional
-from dotenv import load_dotenv
-from growwapi import GrowwAPI
 import traceback
-from quant_models import screen_market_bullish, execute_hft_sequence
+from typing import List, Optional
+
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from growwapi import GrowwAPI
+from pydantic import BaseModel
+
 from ai_engine import ai_engine
+from quant_models import execute_hft_sequence, screen_market_bullish
 
 # Load .env from root directory (one level up)
 load_dotenv(dotenv_path="../.env")
@@ -40,7 +41,7 @@ app.add_middleware(
 
 class OrderRequest(BaseModel):
     asset: str
-    type: str # "BUY" or "SELL"
+    type: str  # "BUY" or "SELL"
     size: float
     price: float
 
