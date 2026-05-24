@@ -88,13 +88,17 @@ export const LandingPage: React.FC = () => {
           >
             <button 
               onClick={() => navigate('/trade/simulation')}
-              className="px-8 py-4 bg-neonPurple text-bgDark font-bold rounded-sm hover:bg-white hover:shadow-[0_0_30px_rgba(168,85,247,0.5)] transition-all duration-300 flex items-center justify-center gap-2 group"
+              className="px-8 py-4 bg-neonPurple text-bgDark font-bold rounded-sm bg-white hover:shadow-[0_0_30px_rgba(168,85,247,0.5)] transition-all duration-300 flex items-center justify-center gap-2 group"
             >
               Enter Sandbox Simulator
               <ChevronRight size={20} className="group-hover:translate-x-1 transition-transform" />
             </button>
-            <button className="px-8 py-4 bg-white/5 border border-white/10 text-white font-medium rounded-sm hover:bg-white/10 transition-all duration-300">
-              View Documentation
+            <button
+              onClick={() => navigate('/trade/live')}
+              className="px-8 py-4 bg-neonCrimson/10 border border-neonCrimson text-neonCrimson font-bold rounded-sm hover:bg-neonCrimson hover:text-bgDark transition-all duration-300 shadow-[0_0_15px_rgba(255,0,85,0.3)] flex items-center justify-center gap-2 group"
+            >
+              Enter Live Trade Arena
+              <ChevronRight size={20} className="group-hover:translate-x-1 transition-transform" />
             </button>
           </motion.div>
         </div>
