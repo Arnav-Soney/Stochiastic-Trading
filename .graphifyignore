@@ -12,5 +12,5 @@ yarn.lock
 *.log
 .env*
 graphify-out/
-.code-review-graph/
+
 *.example.*

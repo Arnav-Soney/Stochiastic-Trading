@@ -43,14 +43,17 @@ export const WatchlistSidebar: React.FC = () => {
 
       {isAdding && (
         <div className="mb-4 flex gap-2">
-          <select 
-            value={newAsset} 
+          <select
+            value={newAsset}
             onChange={(e) => setNewAsset(e.target.value)}
-            className="flex-1 bg-bgSecondary border border-white/10 text-xs p-2 rounded text-white"
+            className="flex-1 bg-bgSecondary border border-white/10 text-xs p-2 rounded text-white [&>option]:bg-gray-800 [&>option]:text-white"
+            style={{
+              colorScheme: 'dark'
+            }}
           >
-            <option value="">Select...</option>
+            <option value="" style={{backgroundColor: '#1f2937', color: '#fff'}}>Select...</option>
             {availableAssets.filter(a => !watchlist.includes(a)).map(a => (
-              <option key={a} value={a}>{a}</option>
+              <option key={a} value={a} style={{backgroundColor: '#1f2937', color: '#fff'}}>{a}</option>
             ))}
           </select>
           <button 

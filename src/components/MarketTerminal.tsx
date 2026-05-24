@@ -2,203 +2,425 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useTradingStore } from '../store/useTradingStore';
 import { REGIMES } from '../utils/mathEngine';
 import { createChart, ColorType, type IChartApi, type ISeriesApi } from 'lightweight-charts';
+import { Maximize2, Minimize2, CalendarRange } from 'lucide-react';
 
 export const MarketTerminal: React.FC = () => {
   const {
-    prices,
-    candles,
-    orderBook,
-    selectedAsset,
-    setSelectedAsset,
-    placeOrder,
-    currentRegime,
-    tradingMode,
-    liveAssets
+    selectedAsset, setSelectedAsset, prices, candles, currentRegime,
+    orderBook, placeOrder, tradingMode, liveAssets,
+    timeframe, setTimeframe, setCustomDateRange
   } = useTradingStore();
 
   const [orderType, setOrderType] = useState<'BUY' | 'SELL'>('BUY');
   const [orderAmount, setOrderAmount] = useState<number>(1000);
-  
+
+  // Custom Date Picker State
+  const [showCustomPicker, setShowCustomPicker] = useState(false);
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
+
+  // Maximize state
+  const [isMaximized, setIsMaximized] = useState(false);
+
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const candlestickSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
 
-  // Initialize TradingView Chart
+  // Chart height: normal vs maximized
+  const chartHeight = isMaximized ? 600 : 340;
+
+  // Initialize TradingView Lightweight Chart
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
     const chart = createChart(chartContainerRef.current, {
       layout: {
-        background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: '#cbd5e1',
+        background: { type: ColorType.Solid, color: 'rgba(0,0,0,0)' },
+        textColor: '#94a3b8',
+        fontSize: 11,
+        fontFamily: "'JetBrains Mono', monospace",
       },
       grid: {
-        vertLines: { color: 'rgba(255, 255, 255, 0.04)' },
-        horzLines: { color: 'rgba(255, 255, 255, 0.04)' },
+        vertLines: { color: 'rgba(255,255,255,0.04)' },
+        horzLines: { color: 'rgba(255,255,255,0.04)' },
+      },
+      crosshair: {
+        mode: 1,
+        vertLine: { color: 'rgba(0,242,254,0.3)', style: 1, width: 1 },
+        horzLine: { color: 'rgba(0,242,254,0.3)', style: 1, width: 1 },
       },
       timeScale: {
         timeVisible: true,
         secondsVisible: false,
-        borderColor: 'rgba(255, 255, 255, 0.1)',
+        borderColor: 'rgba(255,255,255,0.08)',
+        rightOffset: 5,
+        fixLeftEdge: false,
+        fixRightEdge: false,
       },
       rightPriceScale: {
-        borderColor: 'rgba(255, 255, 255, 0.1)',
+        borderColor: 'rgba(255,255,255,0.08)',
+        autoScale: true,          // FIX #1: auto-scales Y axis to data
+        scaleMargins: { top: 0.1, bottom: 0.1 },
+        entireTextOnly: false,
       },
-      width: 720,
-      height: 340,
+      handleScroll: true,
+      handleScale: true,
+      width: chartContainerRef.current.clientWidth || 600,
+      height: chartHeight,
     });
 
     const candlestickSeries = chart.addCandlestickSeries({
       upColor: '#00e676',
-      downColor: '#ff0055',
+      downColor: '#ff1744',
       borderVisible: false,
       wickUpColor: '#00e676',
-      wickDownColor: '#ff0055',
+      wickDownColor: '#ff1744',
     });
 
     chartRef.current = chart;
     candlestickSeriesRef.current = candlestickSeries;
 
+    // Resize observer to keep chart responsive
+    const observer = new ResizeObserver((entries) => {
+      if (entries[0] && chart) {
+        chart.applyOptions({ width: entries[0].contentRect.width });
+      }
+    });
+    observer.observe(chartContainerRef.current);
+
     return () => {
+      observer.disconnect();
       chart.remove();
     };
-  }, []);
+  }, []); // only mount once
 
-  // Update data when prices or selected asset changes
+  // Re-apply height when maximize changes
+  useEffect(() => {
+    if (chartRef.current) {
+      chartRef.current.applyOptions({ height: chartHeight });
+    }
+  }, [chartHeight]);
+
+  // FIX #3: Update chart data whenever candles OR selectedAsset changes.
+  // We always clear and reset so switching stocks shows the correct data.
   useEffect(() => {
     if (!candlestickSeriesRef.current || !chartRef.current) return;
 
     const assetCandles = candles[selectedAsset] || [];
+
+    // Clear existing data first so old stock candles don't linger
+    try {
+      candlestickSeriesRef.current.setData([]);
+    } catch (_) { /* ignore */ }
+
     if (assetCandles.length === 0) return;
 
-    // Convert our internal candle structure to Lightweight Charts format
-    // Lightweight Charts requires time to be in UNIX timestamp (seconds) or string format
-    const formattedData = assetCandles.map((c, idx) => {
-      // Create a pseudo time based on index if real time isn't available
-      // Assuming 1 minute intervals for simulation
-      const baseTime = Math.floor(Date.now() / 1000) - (assetCandles.length * 60);
-      return {
-        time: (baseTime + idx * 60) as any,
+    // FIX #1: Use real timestamps from backend candle data
+    const seenTimes = new Set<number>();
+    const formattedData: { time: number; open: number; high: number; low: number; close: number }[] = [];
+
+    assetCandles.forEach((c) => {
+      let ts: number;
+      if (c.time) {
+        ts = Math.floor(new Date(c.time).getTime() / 1000);
+      } else {
+        // Simulation mode: evenly spaced 1-minute bars from now backwards
+        ts = Math.floor(Date.now() / 1000) - (assetCandles.length * 60);
+      }
+
+      // Deduplicate timestamps (Lightweight Charts will throw if duplicate)
+      while (seenTimes.has(ts)) ts++;
+      seenTimes.add(ts);
+
+      formattedData.push({
+        time: ts,
         open: c.open,
         high: c.high,
         low: c.low,
         close: c.close,
-      };
+      });
     });
 
-    candlestickSeriesRef.current.setData(formattedData);
-  }, [candles, selectedAsset, currentRegime]);
+    // Sort ascending by time (required by Lightweight Charts)
+    formattedData.sort((a, b) => a.time - b.time);
+
+    try {
+      candlestickSeriesRef.current.setData(formattedData as any);
+      chartRef.current.timeScale().fitContent(); // FIX #1: zoom to fit all data
+    } catch (err) {
+      console.error('Chart setData error:', err);
+    }
+  }, [candles, selectedAsset]);
 
   const handlePlaceOrder = () => {
     if (orderAmount <= 0) return;
     placeOrder(selectedAsset, orderType, orderAmount);
   };
 
+  const handleApplyCustomRange = () => {
+    if (customStart && customEnd) {
+      setCustomDateRange({
+        start: new Date(customStart).toISOString(),
+        end: new Date(customEnd).toISOString(),
+      });
+      setShowCustomPicker(false);
+    }
+  };
+
   const activeBook = orderBook[selectedAsset] || { bids: [], asks: [] };
+  const isLiveArena = window.location.pathname.includes('/trade/live');
+  const currentPrice = prices[selectedAsset] || 0;
 
   return (
     <div style={styles.container}>
-      {/* Asset Selector Header */}
-      <div style={styles.header}>
-        <div style={styles.assetList}>
-          {(tradingMode === 'LIVE' ? liveAssets : ['BTC', 'ETH', 'SOL']).map(asset => {
-            const isActive = asset === selectedAsset;
-            const price = prices[asset] || 0;
-            return (
-              <button
-                key={asset}
-                onClick={() => setSelectedAsset(asset)}
-                style={{
-                  ...styles.assetBtn,
-                  borderColor: isActive ? 'hsl(var(--neon-cyan))' : 'transparent',
-                  background: isActive ? 'hsl(var(--bg-tertiary))' : 'transparent',
-                }}
-              >
-                <span style={styles.assetName}>{asset}{tradingMode === 'SIMULATION' ? '/USD' : ''}</span>
-                <span style={{
-                  ...styles.assetPrice,
-                  color: isActive ? 'hsl(var(--neon-cyan))' : 'hsl(var(--text-primary))'
-                }}>
-                  {tradingMode === 'LIVE' ? '₹' : '$'}{price.toLocaleString()}
-                </span>
-              </button>
-            );
-          })}
+      {/* Asset Selector Header – hidden in Live Arena which has a global search bar */}
+      {!isLiveArena && (
+        <div style={styles.header}>
+          <div style={styles.assetList}>
+            {(tradingMode === 'LIVE' ? liveAssets : ['BTC', 'ETH', 'SOL']).map(asset => {
+              const isActive = asset === selectedAsset;
+              const price = prices[asset] || 0;
+              return (
+                <button
+                  key={asset}
+                  onClick={() => setSelectedAsset(asset)}
+                  style={{
+                    ...styles.assetBtn,
+                    borderColor: isActive ? 'hsl(var(--neon-cyan))' : 'transparent',
+                    background: isActive ? 'hsl(var(--bg-tertiary))' : 'transparent',
+                  }}
+                >
+                  <span style={styles.assetName}>{asset}{tradingMode === 'SIMULATION' ? '/USD' : ''}</span>
+                  <span style={{
+                    ...styles.assetPrice,
+                    color: isActive ? 'hsl(var(--neon-cyan))' : 'hsl(var(--text-primary))'
+                  }}>
+                    {tradingMode === 'LIVE' ? '₹' : '$'}{price.toLocaleString()}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div style={styles.regimeBox}>
+            <span style={styles.regimeLabel}>MARKET STATE:</span>
+            <span style={{
+              ...styles.regimeValue,
+              color: currentRegime === 'STABLE_BULL' ? 'hsl(var(--neon-emerald))' :
+                currentRegime === 'MEAN_REVERTING' ? 'hsl(var(--neon-cyan))' :
+                  currentRegime === 'VOLATILE_BEAR' ? 'hsl(var(--neon-crimson))' : 'hsl(var(--neon-amber))'
+            }}>
+              {REGIMES[currentRegime].label}
+            </span>
+          </div>
         </div>
+      )}
 
-        <div style={styles.regimeBox}>
-          <span style={styles.regimeLabel}>MARKET STATE:</span>
-          <span style={{
-            ...styles.regimeValue,
-            color: currentRegime === 'STABLE_BULL' ? 'hsl(var(--neon-emerald))' :
-                   currentRegime === 'MEAN_REVERTING' ? 'hsl(var(--neon-cyan))' :
-                   currentRegime === 'VOLATILE_BEAR' ? 'hsl(var(--neon-crimson))' : 'hsl(var(--neon-amber))'
-          }}>
-            {REGIMES[currentRegime].label}
-          </span>
+      {/* FIX #2: Timeframe selector + FIX (custom date picker in absolute popover) */}
+      {tradingMode === 'LIVE' && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-bgSecondary border-b border-white/5">
+          <span className="text-[10px] text-gray-500 font-bold font-mono tracking-widest mr-1">TIMEFRAME</span>
+          {['1D', '1W', '1M', '1Y'].map(tf => (
+            <button
+              key={tf}
+              onClick={() => {
+                setTimeframe(tf);
+                setShowCustomPicker(false);
+              }}
+              className={`px-3 py-1 text-xs font-bold rounded transition-all duration-150
+                ${timeframe === tf
+                  ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-400/60 shadow-[0_0_8px_rgba(0,242,254,0.3)]'
+                  : 'bg-white/5 text-gray-400 hover:bg-white/10 border border-transparent'
+                }`}
+            >
+              {tf}
+            </button>
+          ))}
+
+          {/* CUSTOM button with absolute popover — FIX #2 */}
+          <div className="relative">
+            <button
+              onClick={() => {
+                setTimeframe('CUSTOM');
+                setShowCustomPicker(prev => !prev);
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded transition-all duration-150
+                ${timeframe === 'CUSTOM'
+                  ? 'bg-purple-500/20 text-purple-400 border border-purple-400/60 shadow-[0_0_8px_rgba(168,85,247,0.3)]'
+                  : 'bg-white/5 text-gray-400 hover:bg-white/10 border border-transparent'
+                }`}
+            >
+              <CalendarRange size={12} />
+              CUSTOM
+            </button>
+
+            {showCustomPicker && (
+              <div className="absolute top-full mt-2 left-0 z-[200] bg-[#0d1525] border border-purple-500/40 rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.6)] p-4 min-w-[340px]">
+                <div className="text-[10px] font-bold text-purple-400 tracking-widest mb-3">SELECT DATE RANGE</div>
+                <div className="flex gap-4 items-end">
+                  <div className="flex flex-col gap-1 flex-1">
+                    <label className="text-[9px] font-bold text-gray-500 tracking-wider">START DATE</label>
+                    <input
+                      type="date"
+                      value={customStart}
+                      onChange={e => setCustomStart(e.target.value)}
+                      className="bg-white/5 text-white text-xs px-3 py-2 rounded border border-white/10 outline-none focus:border-purple-400/60 transition-colors [color-scheme:dark]"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1 flex-1">
+                    <label className="text-[9px] font-bold text-gray-500 tracking-wider">END DATE</label>
+                    <input
+                      type="date"
+                      value={customEnd}
+                      onChange={e => setCustomEnd(e.target.value)}
+                      className="bg-white/5 text-white text-xs px-3 py-2 rounded border border-white/10 outline-none focus:border-purple-400/60 transition-colors [color-scheme:dark]"
+                    />
+                  </div>
+                  <button
+                    onClick={handleApplyCustomRange}
+                    disabled={!customStart || !customEnd}
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-xs font-bold rounded transition-colors"
+                  >
+                    APPLY
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
+      {/* FIX #4: Chart panel with Maximize button */}
       <div style={styles.bodyGrid}>
-        {/* Live Chart Panel */}
-        <div className="cyber-panel" style={styles.chartPanel}>
+        <div className="cyber-panel" style={{ ...styles.chartPanel, gridColumn: isMaximized ? '1 / -1' : undefined }}>
           <div style={styles.panelTitle}>
-            <span style={{ color: 'hsl(var(--neon-cyan))' }}>⚡</span> STOCHASTIC LIVE TERMINAL
-          </div>
-          <div 
-            ref={chartContainerRef} 
-            style={{ width: '100%', height: 340, background: 'rgba(0,0,0,0.2)', borderRadius: 'var(--radius-sm)' }} 
-          />
-          {/* Chart info badges */}
-          <div style={styles.chartLegend}>
-            <span style={{ color: 'rgba(0, 242, 254, 0.7)' }}>■ Lightweight Charts Engine</span>
-          </div>
-        </div>
-
-        {/* Order Book Side Panel */}
-        <div className="cyber-panel" style={styles.orderBookPanel}>
-          <div style={styles.panelTitle}>
-            <span style={{ color: 'hsl(var(--neon-cyan))' }}>☰</span> REAL-TIME LIQUIDITY DEPTH
-          </div>
-          <div style={styles.bookHeaders}>
-            <span>PRICE (USD)</span>
-            <span>SIZE ({selectedAsset})</span>
-            <span>TOTAL ({selectedAsset})</span>
-          </div>
-          
-          <div style={styles.bookContainer}>
-            {/* Asks (Sell Orders - Top of orderbook) */}
-            <div style={styles.asksList}>
-              {[...activeBook.asks].reverse().slice(0, 5).map((ask, idx) => (
-                <div key={`ask-${idx}`} style={styles.bookRow}>
-                  <span style={{ color: 'hsl(var(--neon-crimson))' }}>{ask.price.toLocaleString()}</span>
-                  <span style={styles.bookMono}>{ask.size}</span>
-                  <span style={styles.bookMono}>{ask.total}</span>
-                </div>
-              ))}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ color: 'hsl(var(--neon-cyan))' }}>⚡</span>
+              <span>{selectedAsset} — LIVE TERMINAL</span>
+              {currentPrice > 0 && (
+                <span style={{ color: 'hsl(var(--neon-cyan))', fontFamily: 'var(--font-mono)', fontSize: 13 }}>
+                  {tradingMode === 'LIVE' ? '₹' : '$'}{currentPrice.toLocaleString()}
+                </span>
+              )}
             </div>
-
-            {/* Spread Row */}
-            <div style={styles.spreadRow}>
-              <span style={styles.spreadLabel}>SPREAD:</span>
-              <span style={styles.spreadVal}>
-                ${((activeBook.asks[0]?.price - activeBook.bids[0]?.price) || 0.1).toFixed(2)}
+            {/* FIX #4: Maximize toggle button */}
+            <button
+              onClick={() => setIsMaximized(v => !v)}
+              title={isMaximized ? 'Minimize chart' : 'Maximize chart'}
+              style={{
+                background: 'rgba(0,242,254,0.08)',
+                border: '1px solid rgba(0,242,254,0.2)',
+                borderRadius: 6,
+                padding: '4px 8px',
+                cursor: 'pointer',
+                color: 'hsl(var(--neon-cyan))',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                transition: 'all 0.2s',
+              }}
+            >
+              {isMaximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+              <span style={{ fontSize: 9, fontWeight: 'bold', letterSpacing: '0.05em' }}>
+                {isMaximized ? 'COLLAPSE' : 'EXPAND'}
               </span>
-            </div>
+            </button>
+          </div>
 
-            {/* Bids (Buy Orders - Bottom of orderbook) */}
-            <div style={styles.bidsList}>
-              {activeBook.bids.slice(0, 5).map((bid, idx) => (
-                <div key={`bid-${idx}`} style={styles.bookRow}>
-                  <span style={{ color: 'hsl(var(--neon-emerald))' }}>{bid.price.toLocaleString()}</span>
-                  <span style={styles.bookMono}>{bid.size}</span>
-                  <span style={styles.bookMono}>{bid.total}</span>
-                </div>
-              ))}
+          {/* Chart container — ResizeObserver keeps width correct */}
+          <div
+            ref={chartContainerRef}
+            style={{
+              width: '100%',
+              height: chartHeight,
+              background: 'rgba(0,0,0,0.2)',
+              borderRadius: 'var(--radius-sm)',
+              transition: 'height 0.3s ease',
+            }}
+          />
+
+          <div style={styles.chartLegend}>
+            <span style={{ color: 'rgba(0,230,118,0.7)' }}>▲ Bull</span>
+            <span style={{ color: 'rgba(255,23,68,0.7)' }}>▼ Bear</span>
+            <span style={{ color: 'rgba(255,255,255,0.2)' }}>|</span>
+            <span style={{ color: 'rgba(0,242,254,0.5)' }}>■ Lightweight Charts Engine</span>
+          </div>
+        </div>
+
+        {/* Order Book Side Panel — pushed below if maximized */}
+        {!isMaximized && (
+          <div className="cyber-panel" style={styles.orderBookPanel}>
+            <div style={styles.panelTitle}>
+              <span style={{ color: 'hsl(var(--neon-cyan))' }}>☰</span> LIQUIDITY DEPTH
+            </div>
+            <div style={styles.bookHeaders}>
+              <span>PRICE</span>
+              <span>SIZE</span>
+              <span>TOTAL</span>
+            </div>
+            <div style={styles.bookContainer}>
+              {/* Asks */}
+              <div style={styles.asksList}>
+                {[...activeBook.asks].reverse().slice(0, 5).map((ask, idx) => (
+                  <div key={`ask-${idx}`} style={styles.bookRow}>
+                    <span style={{ color: 'hsl(var(--neon-crimson))' }}>{ask.price.toLocaleString()}</span>
+                    <span style={styles.bookMono}>{ask.size}</span>
+                    <span style={styles.bookMono}>{ask.total}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={styles.spreadRow}>
+                <span style={styles.spreadLabel}>SPREAD:</span>
+                <span style={styles.spreadVal}>
+                  {((activeBook.asks[0]?.price - activeBook.bids[0]?.price) || 0.1).toFixed(2)}
+                </span>
+              </div>
+              <div style={styles.bidsList}>
+                {activeBook.bids.slice(0, 5).map((bid, idx) => (
+                  <div key={`bid-${idx}`} style={styles.bookRow}>
+                    <span style={{ color: 'hsl(var(--neon-emerald))' }}>{bid.price.toLocaleString()}</span>
+                    <span style={styles.bookMono}>{bid.size}</span>
+                    <span style={styles.bookMono}>{bid.total}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Order Book below chart when maximized */}
+      {isMaximized && (
+        <div className="cyber-panel" style={{ ...styles.orderBookPanel, maxHeight: 'none', flexDirection: 'row', gap: 32 }}>
+          <div style={{ flex: 1 }}>
+            <div style={styles.panelTitle}><span style={{ color: 'hsl(var(--neon-cyan))' }}>☰</span> LIQUIDITY DEPTH</div>
+            <div style={styles.bookHeaders}><span>PRICE</span><span>SIZE</span><span>TOTAL</span></div>
+            <div style={styles.bookContainer}>
+              <div style={styles.asksList}>
+                {[...activeBook.asks].reverse().slice(0, 7).map((ask, idx) => (
+                  <div key={`ask-max-${idx}`} style={styles.bookRow}>
+                    <span style={{ color: 'hsl(var(--neon-crimson))' }}>{ask.price.toLocaleString()}</span>
+                    <span style={styles.bookMono}>{ask.size}</span>
+                    <span style={styles.bookMono}>{ask.total}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={styles.spreadRow}>
+                <span style={styles.spreadLabel}>SPREAD:</span>
+                <span style={styles.spreadVal}>{((activeBook.asks[0]?.price - activeBook.bids[0]?.price) || 0.1).toFixed(2)}</span>
+              </div>
+              <div style={styles.bidsList}>
+                {activeBook.bids.slice(0, 7).map((bid, idx) => (
+                  <div key={`bid-max-${idx}`} style={styles.bookRow}>
+                    <span style={{ color: 'hsl(var(--neon-emerald))' }}>{bid.price.toLocaleString()}</span>
+                    <span style={styles.bookMono}>{bid.size}</span>
+                    <span style={styles.bookMono}>{bid.total}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Execution panel */}
       <div className="cyber-panel" style={styles.executionPanel}>
@@ -232,7 +454,7 @@ export const MarketTerminal: React.FC = () => {
           </div>
 
           <div style={styles.inputWrapper}>
-            <label style={styles.inputLabel}>ALLOCATE CAPITAL (USD)</label>
+            <label style={styles.inputLabel}>ALLOCATE CAPITAL ({tradingMode === 'LIVE' ? 'INR' : 'USD'})</label>
             <div style={{ display: 'flex', gap: 10 }}>
               <input
                 type="number"
@@ -243,12 +465,8 @@ export const MarketTerminal: React.FC = () => {
               />
               <div style={styles.presetButtons}>
                 {[1000, 5000, 10000].map(amt => (
-                  <button
-                    key={amt}
-                    onClick={() => setOrderAmount(amt)}
-                    style={styles.presetBtn}
-                  >
-                    ${amt.toLocaleString()}
+                  <button key={amt} onClick={() => setOrderAmount(amt)} style={styles.presetBtn}>
+                    {tradingMode === 'LIVE' ? '₹' : '$'}{amt.toLocaleString()}
                   </button>
                 ))}
               </div>
@@ -260,7 +478,7 @@ export const MarketTerminal: React.FC = () => {
             className={`cyber-btn ${orderType === 'BUY' ? 'btn-emerald' : 'btn-crimson'}`}
             style={styles.submitOrderBtn}
           >
-            <span>PLACE SIMULATED {orderType} POSITION</span>
+            <span>PLACE {orderType} ORDER</span>
           </button>
         </div>
       </div>
@@ -286,10 +504,7 @@ const styles: Record<string, React.CSSProperties> = {
     flexWrap: 'wrap',
     gap: 12,
   },
-  assetList: {
-    display: 'flex',
-    gap: 12,
-  },
+  assetList: { display: 'flex', gap: 12 },
   assetBtn: {
     border: '1px solid transparent',
     borderRadius: 'var(--radius-sm)',
@@ -300,16 +515,8 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     transition: 'all var(--transition-fast)',
   },
-  assetName: {
-    fontSize: '10px',
-    color: 'hsl(var(--text-muted))',
-    fontWeight: 'bold',
-  },
-  assetPrice: {
-    fontSize: '15px',
-    fontWeight: 'bold',
-    fontFamily: 'var(--font-display)',
-  },
+  assetName: { fontSize: '10px', color: 'hsl(var(--text-muted))', fontWeight: 'bold' },
+  assetPrice: { fontSize: '15px', fontWeight: 'bold', fontFamily: 'var(--font-display)' },
   regimeBox: {
     display: 'flex',
     alignItems: 'center',
@@ -319,18 +526,8 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 'var(--radius-sm)',
     border: '1px solid var(--glass-border)',
   },
-  regimeLabel: {
-    fontSize: '11px',
-    fontWeight: 'bold',
-    color: 'hsl(var(--text-secondary))',
-    letterSpacing: '0.05em',
-  },
-  regimeValue: {
-    fontFamily: 'var(--font-display)',
-    fontSize: '12px',
-    fontWeight: 'bold',
-    letterSpacing: '0.05em',
-  },
+  regimeLabel: { fontSize: '11px', fontWeight: 'bold', color: 'hsl(var(--text-secondary))', letterSpacing: '0.05em' },
+  regimeValue: { fontFamily: 'var(--font-display)', fontSize: '12px', fontWeight: 'bold', letterSpacing: '0.05em' },
   bodyGrid: {
     display: 'grid',
     gridTemplateColumns: '7fr 3fr',
@@ -351,20 +548,10 @@ const styles: Record<string, React.CSSProperties> = {
     paddingBottom: 8,
     display: 'flex',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 6,
   },
-  canvas: {
-    background: 'rgba(0,0,0,0.2)',
-    borderRadius: 'var(--radius-sm)',
-    width: '100%',
-    height: 'auto',
-  },
-  chartLegend: {
-    fontSize: '10px',
-    color: 'hsl(var(--text-muted))',
-    display: 'flex',
-    gap: 12,
-  },
+  chartLegend: { fontSize: '10px', color: 'hsl(var(--text-muted))', display: 'flex', gap: 12 },
   orderBookPanel: {
     padding: 16,
     display: 'flex',
@@ -388,27 +575,10 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'space-between',
     overflowY: 'hidden',
   },
-  asksList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 4,
-  },
-  bidsList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 4,
-  },
-  bookRow: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr 1fr',
-    fontSize: '11px',
-    padding: '2px 0',
-  },
-  bookMono: {
-    fontFamily: 'var(--font-mono)',
-    color: 'hsl(var(--text-secondary))',
-    textAlign: 'left',
-  },
+  asksList: { display: 'flex', flexDirection: 'column', gap: 4 },
+  bidsList: { display: 'flex', flexDirection: 'column', gap: 4 },
+  bookRow: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', fontSize: '11px', padding: '2px 0' },
+  bookMono: { fontFamily: 'var(--font-mono)', color: 'hsl(var(--text-secondary))', textAlign: 'left' },
   spreadRow: {
     display: 'flex',
     justifyContent: 'space-between',
@@ -419,28 +589,16 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '11px',
     margin: '6px 0',
   },
-  spreadLabel: {
-    color: 'hsl(var(--text-muted))',
-    fontWeight: 'bold',
-  },
-  spreadVal: {
-    fontFamily: 'var(--font-mono)',
-    fontWeight: 'bold',
-    color: 'hsl(var(--neon-cyan))',
-  },
-  executionPanel: {
-    padding: 16,
-  },
+  spreadLabel: { color: 'hsl(var(--text-muted))', fontWeight: 'bold' },
+  spreadVal: { fontFamily: 'var(--font-mono)', fontWeight: 'bold', color: 'hsl(var(--neon-cyan))' },
+  executionPanel: { padding: 16 },
   execGrid: {
     display: 'grid',
     gridTemplateColumns: '3fr 4fr 3fr',
     gap: 16,
     alignItems: 'center',
   },
-  orderTypeSelector: {
-    display: 'flex',
-    gap: 10,
-  },
+  orderTypeSelector: { display: 'flex', gap: 10 },
   typeBtn: {
     flex: 1,
     padding: '10px',
@@ -452,21 +610,9 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: '0.05em',
     transition: 'all var(--transition-fast)',
   },
-  inputWrapper: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 6,
-  },
-  inputLabel: {
-    fontSize: '9px',
-    color: 'hsl(var(--text-muted))',
-    fontWeight: 'bold',
-    letterSpacing: '0.05em',
-  },
-  presetButtons: {
-    display: 'flex',
-    gap: 6,
-  },
+  inputWrapper: { display: 'flex', flexDirection: 'column', gap: 6 },
+  inputLabel: { fontSize: '9px', color: 'hsl(var(--text-muted))', fontWeight: 'bold', letterSpacing: '0.05em' },
+  presetButtons: { display: 'flex', gap: 6 },
   presetBtn: {
     background: 'hsl(var(--bg-tertiary))',
     border: '1px solid hsl(var(--border-color))',
@@ -478,9 +624,5 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: 'var(--font-mono)',
     transition: 'all var(--transition-fast)',
   },
-  submitOrderBtn: {
-    width: '100%',
-    padding: '12px',
-    fontWeight: 'bold',
-  }
+  submitOrderBtn: { width: '100%', padding: '12px', fontWeight: 'bold' },
 };
