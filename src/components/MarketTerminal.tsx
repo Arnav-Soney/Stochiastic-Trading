@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useTradingStore } from '../store/useTradingStore';
 import { REGIMES } from '../utils/mathEngine';
+import { createChart, ColorType, type IChartApi, type ISeriesApi } from 'lightweight-charts';
 
 export const MarketTerminal: React.FC = () => {
   const {
@@ -18,182 +19,74 @@ export const MarketTerminal: React.FC = () => {
   const [orderType, setOrderType] = useState<'BUY' | 'SELL'>('BUY');
   const [orderAmount, setOrderAmount] = useState<number>(1000);
   
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
 
-  // Redraw canvas chart when prices or selected asset changes
+  // Initialize TradingView Chart
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!chartContainerRef.current) return;
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const chart = createChart(chartContainerRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: 'transparent' },
+        textColor: '#cbd5e1',
+      },
+      grid: {
+        vertLines: { color: 'rgba(255, 255, 255, 0.04)' },
+        horzLines: { color: 'rgba(255, 255, 255, 0.04)' },
+      },
+      timeScale: {
+        timeVisible: true,
+        secondsVisible: false,
+        borderColor: 'rgba(255, 255, 255, 0.1)',
+      },
+      rightPriceScale: {
+        borderColor: 'rgba(255, 255, 255, 0.1)',
+      },
+      width: 720,
+      height: 340,
+    });
+
+    const candlestickSeries = chart.addCandlestickSeries({
+      upColor: '#00e676',
+      downColor: '#ff0055',
+      borderVisible: false,
+      wickUpColor: '#00e676',
+      wickDownColor: '#ff0055',
+    });
+
+    chartRef.current = chart;
+    candlestickSeriesRef.current = candlestickSeries;
+
+    return () => {
+      chart.remove();
+    };
+  }, []);
+
+  // Update data when prices or selected asset changes
+  useEffect(() => {
+    if (!candlestickSeriesRef.current || !chartRef.current) return;
 
     const assetCandles = candles[selectedAsset] || [];
     if (assetCandles.length === 0) return;
 
-    // Clear canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Draw grid background
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.02)';
-    ctx.lineWidth = 1;
-    const gridCols = 10;
-    const gridRows = 6;
-    for (let i = 0; i < gridCols; i++) {
-      const x = (canvas.width / gridCols) * i;
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, canvas.height);
-      ctx.stroke();
-    }
-    for (let i = 0; i < gridRows; i++) {
-      const y = (canvas.height / gridRows) * i;
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(canvas.width, y);
-      ctx.stroke();
-    }
-
-    // Chart margins
-    const paddingRight = 60;
-    const paddingBottom = 40;
-    const chartWidth = canvas.width - paddingRight;
-    const chartHeight = canvas.height - paddingBottom;
-
-    // Find price limits
-    const highs = assetCandles.map(c => c.high);
-    const lows = assetCandles.map(c => c.low);
-    const maxPrice = Math.max(...highs) * 1.002;
-    const minPrice = Math.min(...lows) * 0.998;
-    const priceRange = maxPrice - minPrice;
-
-    // Helper to map price to Y coordinates
-    const getY = (price: number) => {
-      return chartHeight - ((price - minPrice) / priceRange) * chartHeight;
-    };
-
-    // Draw price scale on right
-    ctx.fillStyle = '#64748b';
-    ctx.font = '9px Fira Code';
-    ctx.textAlign = 'left';
-    const priceSteps = 5;
-    for (let i = 0; i <= priceSteps; i++) {
-      const price = minPrice + (priceRange / priceSteps) * i;
-      const y = getY(price);
-      ctx.fillText(Math.round(price).toLocaleString(), chartWidth + 5, y + 3);
-      
-      // Dashed horizontal guidelines
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(chartWidth, y);
-      ctx.stroke();
-    }
-
-    // Draw candles
-    const candleWidth = (chartWidth / assetCandles.length) * 0.7;
-    const spacing = chartWidth / assetCandles.length;
-
-    assetCandles.forEach((candle, idx) => {
-      const x = idx * spacing + spacing / 2;
-      const openY = getY(candle.open);
-      const closeY = getY(candle.close);
-      const highY = getY(candle.high);
-      const lowY = getY(candle.low);
-      const isBullish = candle.close >= candle.open;
-
-      // Color scheme based on bullish/bearish
-      const neonEmerald = '#00e676';
-      const neonCrimson = '#ff0055';
-      ctx.strokeStyle = isBullish ? neonEmerald : neonCrimson;
-      ctx.fillStyle = isBullish ? 'rgba(0, 230, 118, 0.15)' : 'rgba(255, 0, 85, 0.15)';
-      ctx.lineWidth = 1.5;
-
-      // Draw wick (high to low)
-      ctx.beginPath();
-      ctx.moveTo(x, highY);
-      ctx.lineTo(x, lowY);
-      ctx.stroke();
-
-      // Draw real body
-      ctx.lineWidth = 1;
-      const bodyHeight = Math.abs(closeY - openY) || 1;
-      const bodyY = Math.min(openY, closeY);
-      ctx.beginPath();
-      ctx.rect(x - candleWidth / 2, bodyY, candleWidth, bodyHeight);
-      ctx.fill();
-      ctx.stroke();
-
-      // Glow effect on recent candle
-      if (idx === assetCandles.length - 1) {
-        ctx.save();
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = isBullish ? neonEmerald : neonCrimson;
-        ctx.strokeStyle = isBullish ? neonEmerald : neonCrimson;
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x - candleWidth / 2, bodyY, candleWidth, bodyHeight);
-        ctx.restore();
-      }
+    // Convert our internal candle structure to Lightweight Charts format
+    // Lightweight Charts requires time to be in UNIX timestamp (seconds) or string format
+    const formattedData = assetCandles.map((c, idx) => {
+      // Create a pseudo time based on index if real time isn't available
+      // Assuming 1 minute intervals for simulation
+      const baseTime = Math.floor(Date.now() / 1000) - (assetCandles.length * 60);
+      return {
+        time: (baseTime + idx * 60) as any,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+      };
     });
 
-    // Draw overlay: Stochastic Envelopes (high/low probabilities)
-    ctx.strokeStyle = 'rgba(0, 242, 254, 0.25)';
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    assetCandles.forEach((candle, idx) => {
-      const x = idx * spacing + spacing / 2;
-      const avgPrice = (candle.high + candle.low) / 2;
-      const envOffset = avgPrice * (REGIMES[currentRegime].volatility * 0.08);
-      const upperEnv = getY(avgPrice + envOffset);
-      if (idx === 0) ctx.moveTo(x, upperEnv);
-      else ctx.lineTo(x, upperEnv);
-    });
-    ctx.stroke();
-
-    ctx.strokeStyle = 'rgba(255, 145, 0, 0.25)';
-    ctx.beginPath();
-    assetCandles.forEach((candle, idx) => {
-      const x = idx * spacing + spacing / 2;
-      const avgPrice = (candle.high + candle.low) / 2;
-      const envOffset = avgPrice * (REGIMES[currentRegime].volatility * 0.08);
-      const lowerEnv = getY(avgPrice - envOffset);
-      if (idx === 0) ctx.moveTo(x, lowerEnv);
-      else ctx.lineTo(x, lowerEnv);
-    });
-    ctx.stroke();
-    ctx.setLineDash([]); // Reset line dash
-
-    // Draw active price horizontal tag
-    const lastCandle = assetCandles[assetCandles.length - 1];
-    if (lastCandle) {
-      const currentY = getY(lastCandle.close);
-      ctx.strokeStyle = '#00f2fe';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(0, currentY);
-      ctx.lineTo(chartWidth, currentY);
-      ctx.stroke();
-
-      // Glowing tag box on scale
-      ctx.fillStyle = '#00f2fe';
-      ctx.shadowBlur = 8;
-      ctx.shadowColor = '#00f2fe';
-      ctx.beginPath();
-      if (typeof ctx.roundRect === 'function') {
-        ctx.roundRect(chartWidth + 3, currentY - 7, 50, 14, 2);
-      } else {
-        ctx.rect(chartWidth + 3, currentY - 7, 50, 14);
-      }
-      ctx.fill();
-      ctx.shadowBlur = 0; // Reset shadow
-
-      ctx.fillStyle = '#0a0c12';
-      ctx.font = 'bold 9px Orbitron';
-      ctx.textAlign = 'center';
-      ctx.fillText(Math.round(lastCandle.close).toLocaleString(), chartWidth + 28, currentY + 3);
-    }
-
+    candlestickSeriesRef.current.setData(formattedData);
   }, [candles, selectedAsset, currentRegime]);
 
   const handlePlaceOrder = () => {
@@ -252,16 +145,13 @@ export const MarketTerminal: React.FC = () => {
           <div style={styles.panelTitle}>
             <span style={{ color: 'hsl(var(--neon-cyan))' }}>⚡</span> STOCHASTIC LIVE TERMINAL
           </div>
-          <canvas
-            ref={canvasRef}
-            width={720}
-            height={340}
-            style={styles.canvas}
+          <div 
+            ref={chartContainerRef} 
+            style={{ width: '100%', height: 340, background: 'rgba(0,0,0,0.2)', borderRadius: 'var(--radius-sm)' }} 
           />
           {/* Chart info badges */}
           <div style={styles.chartLegend}>
-            <span style={{ color: 'rgba(0, 242, 254, 0.7)' }}>■ Breakout Probability Envelope (68% Confidence)</span>
-            <span style={{ color: 'rgba(255, 145, 0, 0.7)', marginLeft: 15 }}>■ Volatility Shock Zone</span>
+            <span style={{ color: 'rgba(0, 242, 254, 0.7)' }}>■ Lightweight Charts Engine</span>
           </div>
         </div>
 

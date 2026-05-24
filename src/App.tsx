@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { TradingProvider } from './store/useTradingStore';
 import { MarketTerminal } from './components/MarketTerminal';
 import { MonteCarloVisualizer } from './components/MonteCarloVisualizer';
 import { StrategyLab } from './components/StrategyLab';
 import { AICopilot } from './components/AICopilot';
 import { RiskHUD } from './components/RiskHUD';
+import { WatchlistSidebar } from './components/WatchlistSidebar';
+import { LandingPage } from './pages/LandingPage';
 
 type Tab = 'TERMINAL' | 'MONTE_CARLO' | 'STRATEGY_LAB';
 
@@ -26,7 +29,7 @@ const DashboardContent: React.FC = () => {
     <div style={styles.appContainer} className="hud-grid scanline-effect">
       {/* Top Header */}
       <header style={styles.header}>
-        <div style={styles.logoGroup}>
+        <div onClick={() => window.location.href = '/'} style={{cursor: 'pointer', ...styles.logoGroup}}>
           <div style={styles.logoGlow}></div>
           <span style={styles.logoText} className="font-display glow-cyan">STOCHASTIC_TRADING</span>
           <span style={styles.logoVer}>v1.0.4-PRO</span>
@@ -85,7 +88,12 @@ const DashboardContent: React.FC = () => {
 
       {/* Main Core Dashboard Grid */}
       <main style={styles.mainGrid}>
-        {/* Active tab content on left */}
+        {/* Watchlist Sidebar */}
+        <div style={styles.sidebarCol}>
+          <WatchlistSidebar />
+        </div>
+
+        {/* Active tab content in middle */}
         <div style={styles.leftCol}>
           {activeTab === 'TERMINAL' && <MarketTerminal />}
           {activeTab === 'MONTE_CARLO' && <MonteCarloVisualizer />}
@@ -108,9 +116,14 @@ const DashboardContent: React.FC = () => {
 
 export default function App() {
   return (
-    <TradingProvider>
-      <DashboardContent />
-    </TradingProvider>
+    <BrowserRouter>
+      <TradingProvider>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/trade" element={<DashboardContent />} />
+        </Routes>
+      </TradingProvider>
+    </BrowserRouter>
   );
 }
 
@@ -203,17 +216,24 @@ const styles: Record<string, React.CSSProperties> = {
   },
   mainGrid: {
     display: 'grid',
-    gridTemplateColumns: '7.3fr 2.7fr',
+    gridTemplateColumns: '250px 1fr 300px',
     gap: 16,
     flex: 1,
+  },
+  sidebarCol: {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
   },
   leftCol: {
     display: 'flex',
     flexDirection: 'column',
     width: '100%',
+    overflowX: 'hidden',
   },
   rightCol: {
     width: '100%',
+    height: '100%',
   },
   footer: {
     width: '100%',
