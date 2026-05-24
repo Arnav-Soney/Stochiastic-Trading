@@ -10,7 +10,9 @@ export const MarketTerminal: React.FC = () => {
     selectedAsset,
     setSelectedAsset,
     placeOrder,
-    currentRegime
+    currentRegime,
+    tradingMode,
+    liveAssets
   } = useTradingStore();
 
   const [orderType, setOrderType] = useState<'BUY' | 'SELL'>('BUY');
@@ -206,7 +208,7 @@ export const MarketTerminal: React.FC = () => {
       {/* Asset Selector Header */}
       <div style={styles.header}>
         <div style={styles.assetList}>
-          {['BTC', 'ETH', 'SOL'].map(asset => {
+          {(tradingMode === 'LIVE' ? liveAssets : ['BTC', 'ETH', 'SOL']).map(asset => {
             const isActive = asset === selectedAsset;
             const price = prices[asset] || 0;
             return (
@@ -219,12 +221,12 @@ export const MarketTerminal: React.FC = () => {
                   background: isActive ? 'hsl(var(--bg-tertiary))' : 'transparent',
                 }}
               >
-                <span style={styles.assetName}>{asset}/USD</span>
+                <span style={styles.assetName}>{asset}{tradingMode === 'SIMULATION' ? '/USD' : ''}</span>
                 <span style={{
                   ...styles.assetPrice,
                   color: isActive ? 'hsl(var(--neon-cyan))' : 'hsl(var(--text-primary))'
                 }}>
-                  ${price.toLocaleString()}
+                  {tradingMode === 'LIVE' ? '₹' : '$'}{price.toLocaleString()}
                 </span>
               </button>
             );

@@ -20,6 +20,7 @@ export const MonteCarloVisualizer: React.FC = () => {
   useEffect(() => {
     setTargetUpper(Math.round(currentPrice * 1.06));
     setTargetLower(Math.round(currentPrice * 0.94));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAsset]);
 
   useEffect(() => {

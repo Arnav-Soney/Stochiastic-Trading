@@ -10,7 +10,7 @@ interface Message {
 }
 
 export const AICopilot: React.FC = () => {
-  const { selectedAsset, prices, stochastic, currentRegime, probabilities } = useTradingStore();
+  const { selectedAsset, prices, stochastic, currentRegime, probabilities, tradingMode } = useTradingStore();
 
   const [input, setInput] = useState<string>('');
   const [messages, setMessages] = useState<Message[]>([
@@ -47,7 +47,7 @@ export const AICopilot: React.FC = () => {
 
     // AI dynamic reasoning pipeline
     setTimeout(() => {
-      let aiText = '';
+      let aiText: string;
       let isCode = false;
 
       const lowerText = text.toLowerCase();
@@ -58,7 +58,7 @@ export const AICopilot: React.FC = () => {
       if (lowerText.includes('strategy') || lowerText.includes('scalp') || lowerText.includes('create')) {
         isCode = true;
         aiText = `// STOCHASTIC HIGH-FREQUENCY SCALPER STRATEGY
-// Target Asset: ${selectedAsset}/USD
+// Target Asset: ${selectedAsset}${tradingMode === 'SIMULATION' ? '/USD' : ''}
 // Compiled for: STOCH-AI Automated Bot Runner
 
 strategy("StochAI_Scalper_${selectedAsset}", overlay=true)
@@ -78,8 +78,8 @@ if (buy_signal)
 if (sell_signal)
     strategy.close("Long", comment="Reversal Exhaustion Detected")
 `;
-      } else if (lowerText.includes('btc') || lowerText.includes('price') || lowerText.includes('analyze') || lowerText.includes('market')) {
-        aiText = `ANALYSIS FOR ${selectedAsset}/USD:
+      } else if (lowerText.includes(selectedAsset.toLowerCase()) || lowerText.includes('price') || lowerText.includes('analyze') || lowerText.includes('market')) {
+        aiText = `ANALYSIS FOR ${selectedAsset}${tradingMode === 'SIMULATION' ? '/USD' : ''}:
 Current Market Regime: "${activeRegime.label}"
 Estimated tail risk is currently ${probabilities.liquidation > 30 ? 'HIGH' : 'STABLE'} at ${probabilities.liquidation}% liquidation probability.
 Stochastic oscillators show %K at ${stochVal.k} and %D at ${stochVal.d}. 
@@ -88,13 +88,13 @@ ${stochVal.k < 30 ? 'INDICATOR OVERSOLD: High probability of structural reversal
   'INDICATOR BALANCED: Neutral momentum. Trend continuation likelihood is active.'}`;
       } else if (lowerText.includes('risk') || lowerText.includes('vix') || lowerText.includes('exposure')) {
         aiText = `RISK ENGINE TELEMETRY REPORT:
-- Max Portfolio Value under stress: $100,000 USD
+- Max Portfolio Value under stress: ${tradingMode === 'LIVE' ? '₹83,00,000 INR' : '$100,000 USD'}
 - Current Liquidation Zone Probability: ${probabilities.liquidation}%
 - Current Breakout Threshold: ${probabilities.breakout}%
 - Regime Volatility coefficient: ${activeRegime.volatility}
 We detect no critical overexposure in active positions. Ensure your stop loss multiplier is at least 1.5x ATR during the "${activeRegime.label}" state to avoid standard noise liquidations.`;
       } else {
-        aiText = `Welcome back. The current selected asset is ${selectedAsset} trading at $${currentPrice.toLocaleString()}.
+        aiText = `Welcome back. The current selected asset is ${selectedAsset} trading at ${tradingMode === 'LIVE' ? '₹' : '$'}${currentPrice.toLocaleString()}.
 Stochastic oscillators are outputting K: ${stochVal.k}, D: ${stochVal.d}.
 The market transition state is currently in a "${activeRegime.label}" regime with a ${probabilities.breakout}% breakout probability.
 Let me know if you would like me to compile a custom algorithmic backtest or check risk thresholds.`;

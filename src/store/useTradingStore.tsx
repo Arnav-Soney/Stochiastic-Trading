@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { REGIMES, transitionRegime, calculateStochastic } from '../utils/mathEngine';
 import type { Candle, MarketRegime } from '../utils/mathEngine';
 
@@ -72,6 +72,9 @@ interface TradingContextProps {
     liquidation: number;
   };
   triggerMarketShock: () => void;
+  tradingMode: 'SIMULATION' | 'LIVE';
+  setTradingMode: (mode: 'SIMULATION' | 'LIVE') => void;
+  liveAssets: string[];
 }
 
 const TradingContext = createContext<TradingContextProps | undefined>(undefined);
@@ -101,6 +104,19 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [selectedAsset, setSelectedAsset] = useState<string>('BTC');
   const [currentRegime, setCurrentRegime] = useState<MarketRegime>('STABLE_BULL');
   const regimeRef = useRef<MarketRegime>('STABLE_BULL');
+  const [tradingModeState, setTradingModeState] = useState<'SIMULATION' | 'LIVE'>('SIMULATION');
+  const [liveAssets] = useState<string[]>(['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'IDEA', 'ZOMATO']);
+
+  const tradingMode = tradingModeState;
+  const setTradingMode = (mode: 'SIMULATION' | 'LIVE') => {
+    setTradingModeState(mode);
+    if (mode === 'LIVE' && ['BTC', 'ETH', 'SOL'].includes(selectedAsset)) {
+      setSelectedAsset('RELIANCE');
+    }
+    if (mode === 'SIMULATION' && liveAssets.includes(selectedAsset)) {
+      setSelectedAsset('BTC');
+    }
+  };
 
   // Wallet
   const [wallet, setWallet] = useState<Wallet>({
@@ -159,8 +175,10 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   });
 
   // Ref to access state inside setInterval accurately
-  const stateRef = useRef({ prices, candles, wallet, positions, emotionalMetrics, stochastic });
-  stateRef.current = { prices, candles, wallet, positions, emotionalMetrics, stochastic };
+  const stateRef = useRef({ prices, candles, wallet, positions, emotionalMetrics, stochastic, tradingMode });
+  useLayoutEffect(() => {
+    stateRef.current = { prices, candles, wallet, positions, emotionalMetrics, stochastic, tradingMode };
+  });
 
   // Trigger Market Regime transitions periodically (every 40 seconds)
   useEffect(() => {
@@ -178,6 +196,8 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // Real-time market tick generator simulation (Vite WebSocket effect simulation)
   useEffect(() => {
     const tickInterval = setInterval(() => {
+      if (stateRef.current.tradingMode === 'LIVE') return; // Skip simulation if live
+
       const activeRegime = REGIMES[regimeRef.current];
       const assets = ['BTC', 'ETH', 'SOL'];
       const updatedPrices = { ...stateRef.current.prices };
@@ -296,8 +316,57 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return () => clearInterval(tickInterval);
   }, [selectedAsset]);
 
+  // Live Mode Polling Engine
+  useEffect(() => {
+    if (tradingMode !== 'LIVE') return;
+    
+    const fetchLivePrice = async () => {
+      try {
+        // In a real app we might fetch all assets, here we fetch the selected one for HFT
+        const res = await fetch(`http://localhost:8000/api/groww/market-data/${selectedAsset}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        
+        if (data.status === 'success') {
+           setPrices(prev => ({ ...prev, [selectedAsset]: data.price }));
+           
+           // Generate a dummy candle tick based on live price to keep charts moving
+           setCandles(prev => {
+             const assetCandles = prev[selectedAsset] || generateInitialCandles(data.price, 50);
+             const lastCandleIndex = assetCandles.length - 1;
+             const lastCandle = assetCandles[lastCandleIndex];
+             
+             if (lastCandle) {
+               lastCandle.close = data.price;
+               if (data.price > lastCandle.high) lastCandle.high = data.price;
+               if (data.price < lastCandle.low) lastCandle.low = data.price;
+               assetCandles[lastCandleIndex] = { ...lastCandle };
+             }
+             return { ...prev, [selectedAsset]: [...assetCandles] };
+           });
+           
+           // Recalculate PnL
+           setPositions(prev =>
+             prev.map(pos => {
+               const currentPrice = pos.asset === selectedAsset ? data.price : pos.currentPrice;
+               const priceDiff = currentPrice - pos.entryPrice;
+               const pnl = pos.type === 'BUY' ? priceDiff * pos.size : -priceDiff * pos.size;
+               return { ...pos, currentPrice, pnl: Number(pnl.toFixed(2)) };
+             })
+           );
+        }
+      } catch (e) {
+        console.error("Live polling error", e);
+      }
+    };
+
+    fetchLivePrice();
+    const pollInterval = setInterval(fetchLivePrice, 3000); // 3-second REST API polling
+    return () => clearInterval(pollInterval);
+  }, [tradingMode, selectedAsset]);
+
   // Order execution engine
-  const placeOrder = (asset: string, type: 'BUY' | 'SELL', amountUSD: number) => {
+  const placeOrder = async (asset: string, type: 'BUY' | 'SELL', amountUSD: number) => {
     const currentPrice = prices[asset];
     if (wallet.usd < amountUSD) {
       alert('Insufficient USD balance in simulated paper trading wallet.');
@@ -325,6 +394,28 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }));
 
     const size = amountUSD / currentPrice;
+
+    if (tradingMode === 'LIVE') {
+      try {
+        const response = await fetch('http://localhost:8000/api/groww/order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ asset, type, size, price: currentPrice })
+        });
+        const result = await response.json();
+        
+        if (!response.ok) {
+          alert('Groww Live Order Failed: ' + (result.detail || 'Unknown error'));
+          return; 
+        }
+        console.log('Groww order success:', result);
+        alert(`LIVE ORDER PLACED ON GROWW!\n\nID: ${result.order_id}\nDetails: ${result.message}`);
+      } catch {
+        alert('Failed to connect to Groww Backend Proxy. Make sure the python server is running on port 8000.');
+        return; 
+      }
+    }
+
     const newPosition: Position = {
       id: Math.random().toString(36).substring(2, 9),
       asset,
@@ -425,7 +516,10 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       emotionalMetrics,
       clearEmotionalAlerts,
       probabilities,
-      triggerMarketShock
+      triggerMarketShock,
+      tradingMode,
+      setTradingMode,
+      liveAssets
     }}>
       {children}
     </TradingContext.Provider>
