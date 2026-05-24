@@ -11,7 +11,8 @@ interface BacktestResults {
 }
 
 export const StrategyLab: React.FC = () => {
-  const { candles, selectedAsset } = useTradingStore();
+  const { candles, selectedAsset, tradingMode } = useTradingStore();
+  const [hftLogs, setHftLogs] = useState<string[]>([]);
 
   const [buyThreshold, setBuyThreshold] = useState<number>(20);
   const [sellThreshold, setSellThreshold] = useState<number>(80);
@@ -115,7 +116,7 @@ export const StrategyLab: React.FC = () => {
 
   }, [results]);
 
-  const runBacktest = () => {
+  function runBacktest() {
     setIsRunning(true);
     
     // Simulate slight processing lag for JARVIS experience
@@ -147,7 +148,7 @@ export const StrategyLab: React.FC = () => {
         const tradeSuccess = Math.random() < successChance;
         totalTrades++;
 
-        let tradeReturn = 0;
+        let tradeReturn: number;
         if (tradeSuccess) {
           winCount++;
           tradeReturn = (riskRewardRatio * 1.8) * profitTarget * (1 + Math.random() * 0.5);
@@ -175,7 +176,30 @@ export const StrategyLab: React.FC = () => {
       
       setIsRunning(false);
     }, 800);
-  };
+  }
+
+  const handleExecuteHFT = async () => {
+    if (tradingMode !== 'LIVE') {
+      alert("HFT Sequence can only be run in LIVE trading mode.");
+      return;
+    }
+    setHftLogs(["Initializing HFT sequence on " + selectedAsset + "..."]);
+    try {
+      const res = await fetch('http://localhost:8000/api/groww/hft-sequence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ asset: selectedAsset, quantity: 1 })
+      });
+      const data = await res.json();
+      if (data.status === 'completed') {
+        setHftLogs(prev => [...prev, ...data.logs]);
+      } else {
+        setHftLogs(prev => [...prev, "Failed to run sequence: " + JSON.stringify(data)]);
+      }
+    } catch (e) {
+      setHftLogs(prev => [...prev, "Network error: " + String(e)]);
+    }
+  };;
 
   return (
     <div style={styles.container}>
@@ -249,15 +273,29 @@ export const StrategyLab: React.FC = () => {
               style={styles.slider}
             />
           </div>
-
-          <button
-            onClick={runBacktest}
-            disabled={isRunning}
-            className="cyber-btn btn-emerald"
-            style={styles.runBtn}
-          >
-            <span>{isRunning ? 'RUNNING QUANT BACKTEST...' : '⚡ INITIATE QUANT SIMULATION'}</span>
-          </button>
+          <div style={{ marginTop: '25px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+            <button
+              onClick={runBacktest}
+              style={{...styles.runBtn, opacity: isRunning ? 0.7 : 1, pointerEvents: isRunning ? 'none' : 'auto'}}
+              className="cyber-btn"
+            >
+              {isRunning ? 'CALCULATING QUANTS...' : 'RUN MONTE CARLO BACKTEST'}
+            </button>
+            <button
+              onClick={handleExecuteHFT}
+              style={{...styles.runBtn, background: 'rgba(255, 0, 85, 0.1)', borderColor: 'hsl(var(--neon-crimson))', color: 'hsl(var(--neon-crimson))'}}
+              className="cyber-btn"
+            >
+              EXECUTE 10-SEC HFT SEQUENCE
+            </button>
+          </div>
+          
+          {hftLogs.length > 0 && (
+             <div style={{marginTop: '15px', padding: '10px', background: 'rgba(0,0,0,0.5)', border: '1px solid #333', fontSize: '12px', fontFamily: 'monospace', color: '#00f2fe'}}>
+               <div style={{marginBottom: '5px', fontWeight: 'bold', color: '#fff'}}>HFT TERMINAL LOGS:</div>
+               {hftLogs.map((log, i) => <div key={i}>{log}</div>)}
+             </div>
+          )}
         </div>
 
         {/* Backtester Results Panel */}

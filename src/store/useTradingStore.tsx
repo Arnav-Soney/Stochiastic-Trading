@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { REGIMES, transitionRegime, calculateStochastic } from '../utils/mathEngine';
 import type { Candle, MarketRegime } from '../utils/mathEngine';
 
@@ -72,6 +72,14 @@ interface TradingContextProps {
     liquidation: number;
   };
   triggerMarketShock: () => void;
+  tradingMode: 'SIMULATION' | 'LIVE';
+  setTradingMode: (mode: 'SIMULATION' | 'LIVE') => void;
+  liveAssets: string[];
+  timeframe: string;
+  setTimeframe: (tf: string) => void;
+  customDateRange: { start: string, end: string } | null;
+  setCustomDateRange: (range: { start: string, end: string } | null) => void;
+  liveStockChanges: Record<string, number>;
 }
 
 const TradingContext = createContext<TradingContextProps | undefined>(undefined);
@@ -101,6 +109,78 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [selectedAsset, setSelectedAsset] = useState<string>('BTC');
   const [currentRegime, setCurrentRegime] = useState<MarketRegime>('STABLE_BULL');
   const regimeRef = useRef<MarketRegime>('STABLE_BULL');
+  const [tradingModeState, setTradingModeState] = useState<'SIMULATION' | 'LIVE'>('SIMULATION');
+  
+  // Comprehensive NIFTY50 + Popular Stocks with initial prices
+  const INDIAN_STOCKS_DATA: Record<string, number> = {
+    'RELIANCE': 2456.75,
+    'TCS': 3845.20,
+    'HDFCBANK': 1654.30,
+    'INFY': 1789.45,
+    'ICICIBANK': 1089.60,
+    'HINDUNILVR': 2687.90,
+    'ITC': 456.80,
+    'SBIN': 789.25,
+    'BHARTIARTL': 1234.55,
+    'KOTAKBANK': 1876.40,
+    'LT': 3456.70,
+    'AXISBANK': 1123.45,
+    'ASIANPAINT': 2987.60,
+    'MARUTI': 12456.80,
+    'TITAN': 3234.90,
+    'SUNPHARMA': 1567.25,
+    'ULTRACEMCO': 9876.45,
+    'NESTLEIND': 23456.70,
+    'WIPRO': 456.90,
+    'HCLTECH': 1456.80,
+    'BAJFINANCE': 6789.45,
+    'TATAMOTORS': 987.65,
+    'TATASTEEL': 145.80,
+    'ADANIPORTS': 1234.70,
+    'ONGC': 234.55,
+    'NTPC': 345.60,
+    'POWERGRID': 267.45,
+    'JSWSTEEL': 876.90,
+    'TECHM': 1234.55,
+    'INDUSINDBK': 1456.70,
+    'BAJAJFINSV': 1678.90,
+    'M&M': 2345.80,
+    'DRREDDY': 6234.55,
+    'COALINDIA': 456.70,
+    'GRASIM': 2345.60,
+    'BRITANNIA': 4876.90,
+    'EICHERMOT': 4567.80,
+    'BPCL': 567.45,
+    'CIPLA': 1456.70,
+    'DIVISLAB': 3876.45,
+    'HINDALCO': 678.90,
+    'APOLLOHOSP': 6543.20,
+    'HEROMOTOCO': 4567.80,
+    'SHREECEM': 27654.90,
+    'UPL': 678.45,
+    'TATACONSUM': 1123.40,
+    'ADANIENT': 2876.55,
+    'ZOMATO': 234.65,
+    'PAYTM': 876.45,
+    'IDEA': 12.45
+  };
+  
+  const [liveAssets] = useState<string[]>(Object.keys(INDIAN_STOCKS_DATA));
+  const [liveStockChanges, setLiveStockChanges] = useState<Record<string, number>>({});
+
+  const tradingMode = tradingModeState;
+  const setTradingMode = (mode: 'SIMULATION' | 'LIVE') => {
+    setTradingModeState(mode);
+    if (mode === 'LIVE' && ['BTC', 'ETH', 'SOL'].includes(selectedAsset)) {
+      setSelectedAsset('RELIANCE');
+    }
+    if (mode === 'SIMULATION' && liveAssets.includes(selectedAsset)) {
+      setSelectedAsset('BTC');
+    }
+  };
+
+  const [timeframe, setTimeframe] = useState<string>('1D');
+  const [customDateRange, setCustomDateRange] = useState<{ start: string, end: string } | null>(null);
 
   // Wallet
   const [wallet, setWallet] = useState<Wallet>({
@@ -110,25 +190,47 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     sol: 85
   });
 
-  // Real-time Prices
-  const [prices, setPrices] = useState<Record<string, number>>({
-    BTC: 64250,
-    ETH: 3450,
-    SOL: 145
+  // Real-time Prices - Initialize with all stocks (crypto + Indian stocks)
+  const [prices, setPrices] = useState<Record<string, number>>(() => {
+    const initialPrices: Record<string, number> = {
+      BTC: 64250,
+      ETH: 3450,
+      SOL: 145,
+      ...INDIAN_STOCKS_DATA
+    };
+    return initialPrices;
   });
 
-  // Historical Candles for Indicators
-  const [candles, setCandles] = useState<Record<string, Candle[]>>({
-    BTC: generateInitialCandles(64200, 50),
-    ETH: generateInitialCandles(3440, 50),
-    SOL: generateInitialCandles(142, 50)
+  // Historical Candles for Indicators - Initialize for all stocks
+  const [candles, setCandles] = useState<Record<string, Candle[]>>(() => {
+    const initialCandles: Record<string, Candle[]> = {
+      BTC: generateInitialCandles(64200, 50),
+      ETH: generateInitialCandles(3440, 50),
+      SOL: generateInitialCandles(142, 50)
+    };
+    
+    // Generate initial candles for all Indian stocks
+    Object.entries(INDIAN_STOCKS_DATA).forEach(([symbol, price]) => {
+      initialCandles[symbol] = generateInitialCandles(price, 50);
+    });
+    
+    return initialCandles;
   });
 
   // Indicator outputs
-  const [stochastic, setStochastic] = useState<Record<string, { k: number; d: number }>>({
-    BTC: { k: 50, d: 50 },
-    ETH: { k: 50, d: 50 },
-    SOL: { k: 50, d: 50 }
+  const [stochastic, setStochastic] = useState<Record<string, { k: number; d: number }>>(() => {
+    const initialStochastic: Record<string, { k: number; d: number }> = {
+      BTC: { k: 50, d: 50 },
+      ETH: { k: 50, d: 50 },
+      SOL: { k: 50, d: 50 }
+    };
+    
+    // Initialize stochastic for all Indian stocks
+    Object.keys(INDIAN_STOCKS_DATA).forEach(symbol => {
+      initialStochastic[symbol] = { k: 50, d: 50 };
+    });
+    
+    return initialStochastic;
   });
 
   // Positions and History
@@ -159,8 +261,10 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   });
 
   // Ref to access state inside setInterval accurately
-  const stateRef = useRef({ prices, candles, wallet, positions, emotionalMetrics, stochastic });
-  stateRef.current = { prices, candles, wallet, positions, emotionalMetrics, stochastic };
+  const stateRef = useRef({ prices, candles, wallet, positions, emotionalMetrics, stochastic, tradingMode, timeframe, customDateRange });
+  useLayoutEffect(() => {
+    stateRef.current = { prices, candles, wallet, positions, emotionalMetrics, stochastic, tradingMode, timeframe, customDateRange };
+  });
 
   // Trigger Market Regime transitions periodically (every 40 seconds)
   useEffect(() => {
@@ -178,6 +282,8 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // Real-time market tick generator simulation (Vite WebSocket effect simulation)
   useEffect(() => {
     const tickInterval = setInterval(() => {
+      if (stateRef.current.tradingMode === 'LIVE') return; // Skip simulation if live
+
       const activeRegime = REGIMES[regimeRef.current];
       const assets = ['BTC', 'ETH', 'SOL'];
       const updatedPrices = { ...stateRef.current.prices };
@@ -296,8 +402,144 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return () => clearInterval(tickInterval);
   }, [selectedAsset]);
 
+  // Generate Historical Data on Asset or Timeframe Change (Client-side simulation)
+  useEffect(() => {
+    if (tradingMode !== 'LIVE') return;
+
+    // Determine number of candles based on timeframe
+    let candleCount = 50;
+    switch (timeframe) {
+      case '1D':
+        candleCount = 78;  // 78 5-minute candles = 6.5 hours (half trading day)
+        break;
+      case '1W':
+        candleCount = 120; // 120 hourly candles = 5 trading days
+        break;
+      case '1M':
+        candleCount = 160; // ~160 4-hour candles = ~1 month
+        break;
+      case '1Y':
+        candleCount = 252; // 252 daily candles = ~1 year of trading days
+        break;
+      case 'CUSTOM':
+        if (customDateRange) {
+          const start = new Date(customDateRange.start).getTime();
+          const end = new Date(customDateRange.end).getTime();
+          const daysDiff = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+          candleCount = Math.min(Math.max(daysDiff, 30), 500); // Between 30 and 500 candles
+        } else {
+          candleCount = 100;
+        }
+        break;
+      default:
+        candleCount = 100;
+    }
+
+    // Regenerate candles with appropriate count for timeframe
+    const basePrice = INDIAN_STOCKS_DATA[selectedAsset] || prices[selectedAsset] || 100;
+    const newCandles = generateInitialCandles(basePrice, candleCount);
+    
+    setCandles(prev => ({
+      ...prev,
+      [selectedAsset]: newCandles
+    }));
+    
+    setStochastic(prev => ({
+      ...prev,
+      [selectedAsset]: calculateStochastic(newCandles)
+    }));
+  }, [tradingMode, selectedAsset, timeframe, customDateRange]);
+
+  // Live Mode Simulation Engine — client-side price updates for Indian stocks
+  useEffect(() => {
+    if (tradingMode !== 'LIVE') return;
+
+    const tickInterval = setInterval(() => {
+      const updatedPrices = { ...stateRef.current.prices };
+      const updatedCandles = { ...stateRef.current.candles };
+      const updatedStoch = { ...stateRef.current.stochastic };
+
+      // Simulate price movements for all Indian stocks
+      liveAssets.forEach(asset => {
+        const currentPrice = stateRef.current.prices[asset];
+        if (!currentPrice) return;
+
+        // Smaller volatility for stock market (0.3% typical intraday movement)
+        const priceChangePct = (Math.random() - 0.5) * 0.006; // ±0.3% per tick
+        const finalPrice = Math.max(1, currentPrice * (1 + priceChangePct));
+        
+        updatedPrices[asset] = Number(finalPrice.toFixed(2));
+
+        // Update Candles
+        const assetCandles = updatedCandles[asset] || [];
+        if (assetCandles.length === 0) return;
+
+        const lastCandleIndex = assetCandles.length - 1;
+        const lastCandle = { ...assetCandles[lastCandleIndex] };
+        
+        // Create new candle occasionally (5% chance per tick)
+        const isNewBar = Math.random() < 0.05;
+
+        if (isNewBar) {
+          const newTime = new Date().toISOString();
+          assetCandles.push({
+            time: newTime,
+            open: lastCandle.close,
+            high: lastCandle.close,
+            low: lastCandle.close,
+            close: finalPrice,
+            volume: Math.round(1000 + Math.random() * 5000)
+          });
+          if (assetCandles.length > 100) assetCandles.shift(); // Keep last 100 candles
+        } else {
+          // Update current candle
+          lastCandle.close = finalPrice;
+          if (finalPrice > lastCandle.high) lastCandle.high = finalPrice;
+          if (finalPrice < lastCandle.low) lastCandle.low = finalPrice;
+          lastCandle.volume += Math.round(Math.random() * 100);
+          assetCandles[lastCandleIndex] = lastCandle;
+        }
+
+        updatedCandles[asset] = [...assetCandles];
+        
+        // Recalculate Stochastic
+        updatedStoch[asset] = calculateStochastic(assetCandles);
+      });
+
+      setPrices(updatedPrices);
+      setCandles(updatedCandles);
+      setStochastic(updatedStoch);
+
+      // Update position PnL
+      setPositions(prev =>
+        prev.map(pos => {
+          const currentPrice = updatedPrices[pos.asset] || pos.currentPrice;
+          const priceDiff = currentPrice - pos.entryPrice;
+          const pnl = pos.type === 'BUY' ? priceDiff * pos.size : -priceDiff * pos.size;
+          return { ...pos, currentPrice, pnl: Number(pnl.toFixed(2)) };
+        })
+      );
+
+      // Update stock changes for gainers/losers tracking
+      setLiveStockChanges(prev => {
+        const updated = { ...prev };
+        liveAssets.forEach(asset => {
+          const basePrice = INDIAN_STOCKS_DATA[asset];
+          const currentPrice = updatedPrices[asset];
+          if (basePrice && currentPrice) {
+            updated[asset] = Number((((currentPrice - basePrice) / basePrice) * 100).toFixed(2));
+          }
+        });
+        return updated;
+      });
+
+    }, 500); // Update every 500ms for smooth live feel
+
+    return () => clearInterval(tickInterval);
+  }, [tradingMode, liveAssets]);
+
   // Order execution engine
-  const placeOrder = (asset: string, type: 'BUY' | 'SELL', amountUSD: number) => {
+  const placeOrder = async (asset: string, type: 'BUY' | 'SELL', amountUSD: number) => {
     const currentPrice = prices[asset];
     if (wallet.usd < amountUSD) {
       alert('Insufficient USD balance in simulated paper trading wallet.');
@@ -325,6 +567,28 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }));
 
     const size = amountUSD / currentPrice;
+
+    if (tradingMode === 'LIVE') {
+      try {
+        const response = await fetch('http://localhost:8000/api/groww/order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ asset, type, size, price: currentPrice })
+        });
+        const result = await response.json();
+        
+        if (!response.ok) {
+          alert('Groww Live Order Failed: ' + (result.detail || 'Unknown error'));
+          return; 
+        }
+        console.log('Groww order success:', result);
+        alert(`LIVE ORDER PLACED ON GROWW!\n\nID: ${result.order_id}\nDetails: ${result.message}`);
+      } catch {
+        alert('Failed to connect to Groww Backend Proxy. Make sure the python server is running on port 8000.');
+        return; 
+      }
+    }
+
     const newPosition: Position = {
       id: Math.random().toString(36).substring(2, 9),
       asset,
@@ -425,7 +689,15 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       emotionalMetrics,
       clearEmotionalAlerts,
       probabilities,
-      triggerMarketShock
+      triggerMarketShock,
+      tradingMode,
+      setTradingMode,
+      liveAssets,
+      timeframe,
+      setTimeframe,
+      customDateRange,
+      setCustomDateRange,
+      liveStockChanges
     }}>
       {children}
     </TradingContext.Provider>
@@ -439,3 +711,4 @@ export const useTradingStore = () => {
   }
   return context;
 };
+

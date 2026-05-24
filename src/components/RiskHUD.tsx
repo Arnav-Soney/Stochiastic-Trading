@@ -9,7 +9,9 @@ export const RiskHUD: React.FC = () => {
     closePosition,
     emotionalMetrics,
     clearEmotionalAlerts,
-    triggerMarketShock
+    triggerMarketShock,
+    tradingMode,
+    setTradingMode
   } = useTradingStore();
 
   // Convert assets to USD values
@@ -68,6 +70,45 @@ export const RiskHUD: React.FC = () => {
           <div style={styles.panelTitle}>
             <span style={{ color: 'hsl(var(--neon-emerald))' }}>💼</span> QUANT PORTFOLIO INTELLIGENCE
           </div>
+
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            background: 'rgba(0,0,0,0.4)',
+            padding: '10px 15px',
+            borderRadius: '6px',
+            border: `1px solid ${tradingMode === 'LIVE' ? 'hsl(var(--neon-crimson))' : 'hsl(var(--neon-cyan))'}`,
+            marginBottom: '20px'
+          }}>
+            <div>
+              <div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', letterSpacing: '1px' }}>EXECUTION MODE</div>
+              <div style={{ 
+                color: tradingMode === 'LIVE' ? 'hsl(var(--neon-crimson))' : 'hsl(var(--neon-cyan))',
+                fontWeight: 'bold',
+                textShadow: tradingMode === 'LIVE' ? '0 0 10px rgba(255,0,85,0.5)' : '0 0 10px rgba(0,255,255,0.5)'
+              }}>
+                {tradingMode === 'LIVE' ? 'LIVE MARKET (GROWW API)' : 'PAPER TRADING SIMULATION'}
+              </div>
+            </div>
+            <button 
+              onClick={() => setTradingMode(tradingMode === 'LIVE' ? 'SIMULATION' : 'LIVE')}
+              style={{
+                background: tradingMode === 'LIVE' ? 'rgba(255,0,85,0.1)' : 'rgba(0,255,255,0.1)',
+                border: `1px solid ${tradingMode === 'LIVE' ? 'hsl(var(--neon-crimson))' : 'hsl(var(--neon-cyan))'}`,
+                color: tradingMode === 'LIVE' ? 'hsl(var(--neon-crimson))' : 'hsl(var(--neon-cyan))',
+                padding: '8px 16px',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                textTransform: 'uppercase',
+                transition: 'all 0.3s ease'
+              }}
+            >
+              SWITCH TO {tradingMode === 'LIVE' ? 'SIMULATION' : 'LIVE'}
+            </button>
+          </div>
+
 
           <div style={styles.balanceSummary}>
             <span style={styles.totalLabel}>NET PORTFOLIO VAL (USD)</span>

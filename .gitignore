@@ -24,6 +24,7 @@ dist-ssr
 *.sw?
 
 .env
+server/__pycache__
 
 AGENTS.md
 GEMINI.md
