@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database for User Profiles, Portfolios, and Historical Trades
+  postgres:
+    image: postgres:15-alpine
+    container_name: stoch_postgres
+    environment:
+      POSTGRES_USER: stoch_admin
+      POSTGRES_PASSWORD: stoch_password
+      POSTGRES_DB: stoch_trading
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # Redis for Sub-millisecond Order Book Caching and Real-time Pricing
+  redis:
+    image: redis:7-alpine
+    container_name: stoch_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  # Redpanda: Lightweight Drop-in Replacement for Kafka (No Zookeeper needed)
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v23.1.2
+    container_name: stoch_kafka
+    command:
+      - redpanda
+      - start
+      - --smp 1
+      - --memory 1G
+      - --reserve-memory 0M
+      - --overprovisioned
+      - --node-id 0
+      - --kafka-addr PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092
+      - --pandaproxy-addr 0.0.0.0:8082
+      - --advertise-pandaproxy-addr localhost:8082
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+      - "8082:8082"
+      - "9644:9644"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  redpanda_data:
