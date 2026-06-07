@@ -22,9 +22,24 @@ export const MarketTerminal: React.FC = () => {
   // Maximize state
   const [isMaximized, setIsMaximized] = useState(false);
 
+  // Drawing mode state
+  const [drawMode, setDrawMode] = useState<'NONE' | 'SOLID' | 'DOTTED'>('NONE');
+
+  type Trendline = {
+    id: string;
+    start: { logical: number; price: number };
+    end: { logical: number; price: number };
+    style: 'SOLID' | 'DOTTED';
+  };
+
+  const [trendlines, setTrendlines] = useState<Trendline[]>([]);
+  const [drawingLine, setDrawingLine] = useState<{ start: { logical: number; price: number }, endX: number, endY: number } | null>(null);
+  const [, forceRender] = useState({});
+
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candlestickSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const lastAssetRef = useRef<string>('');
 
   // Chart height: normal vs maximized
   const chartHeight = isMaximized ? 600 : 340;
@@ -80,6 +95,10 @@ export const MarketTerminal: React.FC = () => {
     chartRef.current = chart;
     candlestickSeriesRef.current = candlestickSeries;
 
+    const handleChartChange = () => forceRender({});
+    chart.timeScale().subscribeVisibleTimeRangeChange(handleChartChange);
+    chart.timeScale().subscribeSizeChange(handleChartChange);
+
     // Resize observer to keep chart responsive
     const observer = new ResizeObserver((entries) => {
       if (entries[0] && chart) {
@@ -90,6 +109,8 @@ export const MarketTerminal: React.FC = () => {
 
     return () => {
       observer.disconnect();
+      chart.timeScale().unsubscribeVisibleTimeRangeChange(handleChartChange);
+      chart.timeScale().unsubscribeSizeChange(handleChartChange);
       chart.remove();
     };
   }, []); // only mount once
@@ -102,20 +123,22 @@ export const MarketTerminal: React.FC = () => {
   }, [chartHeight]);
 
   // FIX #3: Update chart data whenever candles OR selectedAsset changes.
-  // We always clear and reset so switching stocks shows the correct data.
   useEffect(() => {
     if (!candlestickSeriesRef.current || !chartRef.current) return;
 
     const assetCandles = candles[selectedAsset] || [];
+    const isNewAsset = lastAssetRef.current !== selectedAsset;
 
-    // Clear existing data first so old stock candles don't linger
-    try {
-      candlestickSeriesRef.current.setData([]);
-    } catch (_) { /* ignore */ }
+    // Clear existing data only when switching to a new asset
+    if (isNewAsset) {
+      lastAssetRef.current = selectedAsset;
+      try {
+        candlestickSeriesRef.current.setData([]);
+      } catch (_) { /* ignore */ }
+    }
 
     if (assetCandles.length === 0) return;
 
-    // FIX #1: Use real timestamps from backend candle data
     const seenTimes = new Set<number>();
     const formattedData: { time: number; open: number; high: number; low: number; close: number }[] = [];
 
@@ -124,11 +147,9 @@ export const MarketTerminal: React.FC = () => {
       if (c.time) {
         ts = Math.floor(new Date(c.time).getTime() / 1000);
       } else {
-        // Simulation mode: evenly spaced 1-minute bars from now backwards
         ts = Math.floor(Date.now() / 1000) - (assetCandles.length * 60);
       }
 
-      // Deduplicate timestamps (Lightweight Charts will throw if duplicate)
       while (seenTimes.has(ts)) ts++;
       seenTimes.add(ts);
 
@@ -141,16 +162,19 @@ export const MarketTerminal: React.FC = () => {
       });
     });
 
-    // Sort ascending by time (required by Lightweight Charts)
     formattedData.sort((a, b) => a.time - b.time);
 
     try {
       candlestickSeriesRef.current.setData(formattedData as any);
-      chartRef.current.timeScale().fitContent(); // FIX #1: zoom to fit all data
+      if (isNewAsset) {
+        chartRef.current.timeScale().fitContent(); // Only zoom to fit on initial load
+      }
     } catch (err) {
       console.error('Chart setData error:', err);
     }
   }, [candles, selectedAsset]);
+
+
 
   const handlePlaceOrder = () => {
     if (orderAmount <= 0) return;
@@ -302,41 +326,168 @@ export const MarketTerminal: React.FC = () => {
                 </span>
               )}
             </div>
-            {/* FIX #4: Maximize toggle button */}
-            <button
-              onClick={() => setIsMaximized(v => !v)}
-              title={isMaximized ? 'Minimize chart' : 'Maximize chart'}
-              style={{
-                background: 'rgba(0,242,254,0.08)',
-                border: '1px solid rgba(0,242,254,0.2)',
-                borderRadius: 6,
-                padding: '4px 8px',
-                cursor: 'pointer',
-                color: 'hsl(var(--neon-cyan))',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                transition: 'all 0.2s',
-              }}
-            >
-              {isMaximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-              <span style={{ fontSize: 9, fontWeight: 'bold', letterSpacing: '0.05em' }}>
-                {isMaximized ? 'COLLAPSE' : 'EXPAND'}
-              </span>
-            </button>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button
+                onClick={() => setDrawMode(drawMode === 'SOLID' ? 'NONE' : 'SOLID')}
+                style={{
+                  background: drawMode === 'SOLID' ? 'rgba(0,230,118,0.2)' : 'rgba(255,255,255,0.05)',
+                  border: `1px solid ${drawMode === 'SOLID' ? 'rgba(0,230,118,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                  borderRadius: 6,
+                  padding: '4px 8px',
+                  cursor: 'pointer',
+                  color: drawMode === 'SOLID' ? '#00e676' : 'hsl(var(--text-secondary))',
+                  fontSize: 10,
+                  fontWeight: 'bold',
+                }}
+                title={drawMode === 'SOLID' ? 'Click on chart to draw' : 'Add Solid Trendline'}
+              >
+                — SOLID
+              </button>
+              <button
+                onClick={() => setDrawMode(drawMode === 'DOTTED' ? 'NONE' : 'DOTTED')}
+                style={{
+                  background: drawMode === 'DOTTED' ? 'rgba(0,230,118,0.2)' : 'rgba(255,255,255,0.05)',
+                  border: `1px solid ${drawMode === 'DOTTED' ? 'rgba(0,230,118,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                  borderRadius: 6,
+                  padding: '4px 8px',
+                  cursor: 'pointer',
+                  color: drawMode === 'DOTTED' ? '#00e676' : 'hsl(var(--text-secondary))',
+                  fontSize: 10,
+                  fontWeight: 'bold',
+                }}
+                title={drawMode === 'DOTTED' ? 'Click on chart to draw' : 'Add Dotted Trendline'}
+              >
+                ••• DOTTED
+              </button>
+              <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.1)', margin: '0 4px' }} />
+              {/* FIX #4: Maximize toggle button */}
+              <button
+                onClick={() => setIsMaximized(v => !v)}
+                title={isMaximized ? 'Minimize chart' : 'Maximize chart'}
+                style={{
+                  background: 'rgba(0,242,254,0.08)',
+                  border: '1px solid rgba(0,242,254,0.2)',
+                  borderRadius: 6,
+                  padding: '4px 8px',
+                  cursor: 'pointer',
+                  color: 'hsl(var(--neon-cyan))',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  transition: 'all 0.2s',
+                }}
+              >
+                {isMaximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                <span style={{ fontSize: 9, fontWeight: 'bold', letterSpacing: '0.05em' }}>
+                  {isMaximized ? 'COLLAPSE' : 'EXPAND'}
+                </span>
+              </button>
+            </div>
           </div>
 
-          {/* Chart container — ResizeObserver keeps width correct */}
-          <div
-            ref={chartContainerRef}
-            style={{
-              width: '100%',
-              height: chartHeight,
-              background: 'rgba(0,0,0,0.2)',
-              borderRadius: 'var(--radius-sm)',
-              transition: 'height 0.3s ease',
-            }}
-          />
+          {/* Chart container with SVG overlay for trendlines */}
+          <div style={{ position: 'relative', width: '100%', height: chartHeight, background: 'rgba(0,0,0,0.2)', borderRadius: 'var(--radius-sm)' }}>
+            <div
+              ref={chartContainerRef}
+              style={{
+                width: '100%',
+                height: '100%',
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                transition: 'height 0.3s ease',
+              }}
+            />
+            <svg
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                pointerEvents: drawMode === 'NONE' ? 'none' : 'auto',
+                zIndex: 10,
+                cursor: 'crosshair'
+              }}
+              onMouseDown={(e) => {
+                if (!chartRef.current || !candlestickSeriesRef.current || drawMode === 'NONE') return;
+                const rect = e.currentTarget.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                
+                const logical = chartRef.current.timeScale().coordinateToLogical(x);
+                const price = candlestickSeriesRef.current.coordinateToPrice(y);
+                
+                if (logical !== null && price !== null) {
+                  setDrawingLine({
+                    start: { logical, price },
+                    endX: x,
+                    endY: y
+                  });
+                }
+              }}
+              onMouseMove={(e) => {
+                if (!drawingLine || drawMode === 'NONE') return;
+                const rect = e.currentTarget.getBoundingClientRect();
+                setDrawingLine(prev => prev ? { ...prev, endX: e.clientX - rect.left, endY: e.clientY - rect.top } : null);
+              }}
+              onMouseUp={(e) => {
+                if (!drawingLine || !chartRef.current || !candlestickSeriesRef.current || drawMode === 'NONE') return;
+                const rect = e.currentTarget.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                
+                const logical = chartRef.current.timeScale().coordinateToLogical(x);
+                const price = candlestickSeriesRef.current.coordinateToPrice(y);
+                
+                if (logical !== null && price !== null) {
+                  setTrendlines(prev => [...prev, {
+                    id: Math.random().toString(),
+                    start: drawingLine.start,
+                    end: { logical, price },
+                    style: drawMode as 'SOLID' | 'DOTTED'
+                  }]);
+                }
+                setDrawingLine(null);
+                setDrawMode('NONE');
+              }}
+              onMouseLeave={() => setDrawingLine(null)}
+            >
+              {trendlines.map(line => {
+                if (!chartRef.current || !candlestickSeriesRef.current) return null;
+                const x1 = chartRef.current.timeScale().logicalToCoordinate(line.start.logical as any);
+                const y1 = candlestickSeriesRef.current.priceToCoordinate(line.start.price);
+                const x2 = chartRef.current.timeScale().logicalToCoordinate(line.end.logical as any);
+                const y2 = candlestickSeriesRef.current.priceToCoordinate(line.end.price);
+                
+                if (x1 === null || y1 === null || x2 === null || y2 === null) return null;
+                return (
+                  <line 
+                    key={line.id}
+                    x1={x1} y1={y1} x2={x2} y2={y2} 
+                    stroke="#00e676" 
+                    strokeWidth={2} 
+                    strokeDasharray={line.style === 'DOTTED' ? '6,6' : 'none'} 
+                    opacity={0.8}
+                  />
+                );
+              })}
+              
+              {/* Currently drawing line */}
+              {drawingLine && chartRef.current && candlestickSeriesRef.current && (
+                <line 
+                  x1={chartRef.current.timeScale().logicalToCoordinate(drawingLine.start.logical as any) || 0} 
+                  y1={candlestickSeriesRef.current.priceToCoordinate(drawingLine.start.price) || 0} 
+                  x2={drawingLine.endX} 
+                  y2={drawingLine.endY} 
+                  stroke="#00e676" 
+                  strokeWidth={2} 
+                  strokeDasharray={drawMode === 'DOTTED' ? '6,6' : 'none'} 
+                  opacity={0.8}
+                />
+              )}
+            </svg>
+          </div>
 
           <div style={styles.chartLegend}>
             <span style={{ color: 'rgba(0,230,118,0.7)' }}>▲ Bull</span>

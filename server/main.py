@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from ai_engine import ai_engine
 from quant_models import execute_hft_sequence, screen_market_bullish
+from groww_trading_alogs import IntradayStrategy, ShortTermStrategy, LongTermStrategy, MutualFundCalculator
 
 # Load .env from root directory (one level up)
 load_dotenv(dotenv_path="../.env")
@@ -286,6 +287,77 @@ def get_bullish_recommendations():
         
     rankings = screen_market_bullish(market_data)
     return {"status": "success", "recommendations": rankings}
+
+class StrategyRequest(BaseModel):
+    symbol: str
+    quantity: int = 1
+    strategy_type: str  # "intraday", "short_term", "long_term"
+
+@app.post("/api/groww/strategy/run")
+def run_strategy(req: StrategyRequest):
+    try:
+        if req.strategy_type == "intraday":
+            strategy = IntradayStrategy(req.symbol, req.quantity)
+        elif req.strategy_type == "short_term":
+            strategy = ShortTermStrategy(req.symbol, req.quantity)
+        elif req.strategy_type == "long_term":
+            strategy = LongTermStrategy(req.symbol, req.quantity)
+        else:
+            raise HTTPException(status_code=400, detail="Invalid strategy type")
+
+        # Mock data injection for seeing results without real market data
+        import random
+        base_price = 100.0
+        mock_candles = [
+            {"ts": i, "open": base_price, "high": base_price * 1.02, "low": base_price * 0.98, "close": base_price * (1 + random.uniform(-0.01, 0.01)), "volume": 1000}
+            for i in range(200)
+        ]
+        
+        # Override methods for this instance to use mock data
+        strategy.get_candles = lambda *args, **kwargs: mock_candles
+        strategy.get_ltp = lambda *args, **kwargs: mock_candles[-1]["close"]
+        strategy.place_market_order = lambda *args, **kwargs: {"status": "mock_order_placed"}
+        strategy.place_limit_order = lambda *args, **kwargs: {"status": "mock_order_placed"}
+
+        # Run evaluation step based on strategy type
+        if req.strategy_type == "intraday":
+            # For intraday to trigger logic we can bypass time checks or let it run
+            strategy._market_is_open = lambda: True
+            strategy._should_square_off = lambda: False
+            strategy.run_tick()
+        else:
+            strategy.evaluate()
+
+        return {
+            "status": "success", 
+            "message": f"Ran {req.strategy_type} strategy for {req.symbol} using mock data.",
+            "current_position": strategy.position,
+            "entry_price": getattr(strategy, 'entry_price', None)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class MFCalcRequest(BaseModel):
+    fund_name: str
+    amount: float = 10000.0
+    years: float = 1.0
+    is_sip: bool = False
+    monthly_sip: float = 1000.0
+
+@app.post("/api/groww/mutual-fund/calculate")
+def calculate_mf_returns(req: MFCalcRequest):
+    try:
+        calc = MutualFundCalculator()
+        result = calc.calculate_returns(
+            fund_name=req.fund_name,
+            investment_amount=req.amount,
+            investment_years=req.years,
+            is_sip=req.is_sip,
+            monthly_sip=req.monthly_sip
+        )
+        return {"status": "success", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ==========================================
 # Phase 2: Authentication & JWT (Stubs)
